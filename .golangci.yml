@@ -3,7 +3,7 @@ version: "2"
 run:
   # prevent golangci-lint from deducting the go version to lint for through go.mod,
   # which causes it to fallback to go1.17 semantics.
-  go: "1.24.4"
+  go: "1.24.5"
   concurrency: 2
   # Only supported with go modules enabled (build flag -mod=vendor only valid when using modules)
   # modules-download-mode: vendor
@@ -190,6 +190,8 @@ linters:
           alias: cerrdefs
         - pkg: github.com/containerd/containerd/images
           alias: c8dimages
+        - pkg: github.com/docker/docker/reference
+          alias: refstore
         - pkg: github.com/opencontainers/image-spec/specs-go/v1
           alias: ocispec
         - pkg: go.etcd.io/bbolt
@@ -264,9 +266,6 @@ linters:
       http-status-code: true
 
   exclusions:
-    paths:
-      - volume/drivers/proxy.go # TODO: this is a generated file but with an invalid header, see https://github.com/moby/moby/pull/46274
-
     rules:
         # We prefer to use an "linters.exclusions.rules" so that new "default" exclusions are not
         # automatically inherited. We can decide whether or not to follow upstream

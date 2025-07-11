@@ -73,7 +73,7 @@ func TestPortMappingConfig(t *testing.T) {
 		t.Fatalf("Failed to join the endpoint: %v", err)
 	}
 
-	if err = d.ProgramExternalConnectivity(context.Background(), "dummy", "ep1", sbOptions); err != nil {
+	if err = d.ProgramExternalConnectivity(context.Background(), "dummy", "ep1", "ep1", ""); err != nil {
 		t.Fatalf("Failed to program external connectivity: %v", err)
 	}
 
@@ -102,7 +102,7 @@ func TestPortMappingConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = d.RevokeExternalConnectivity("dummy", "ep1")
+	err = d.ProgramExternalConnectivity(context.Background(), "dummy", "ep1", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestPortMappingV6Config(t *testing.T) {
 		t.Fatalf("Failed to join the endpoint: %v", err)
 	}
 
-	if err = d.ProgramExternalConnectivity(context.Background(), "dummy", "ep1", sbOptions); err != nil {
+	if err = d.ProgramExternalConnectivity(context.Background(), "dummy", "ep1", "ep1", "ep1"); err != nil {
 		t.Fatalf("Failed to program external connectivity: %v", err)
 	}
 
@@ -178,7 +178,7 @@ func TestPortMappingV6Config(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = d.RevokeExternalConnectivity("dummy", "ep1")
+	err = d.ProgramExternalConnectivity(context.Background(), "dummy", "ep1", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,55 +193,62 @@ func loopbackUp() error {
 	return nlHandle.LinkSetUp(iface)
 }
 
-func TestCmpPortBindings(t *testing.T) {
-	pb := types.PortBinding{
-		Proto:       types.TCP,
-		IP:          net.ParseIP("172.17.0.2"),
-		Port:        80,
-		HostIP:      net.ParseIP("192.168.1.2"),
-		HostPort:    8080,
-		HostPortEnd: 8080,
+func TestCmpPortBindingReqs(t *testing.T) {
+	pb := portBindingReq{
+		PortBinding: types.PortBinding{
+			Proto:       types.TCP,
+			IP:          net.ParseIP("172.17.0.2"),
+			Port:        80,
+			HostIP:      net.ParseIP("192.168.1.2"),
+			HostPort:    8080,
+			HostPortEnd: 8080,
+		},
 	}
-	var pbA, pbB types.PortBinding
+	var pbA, pbB portBindingReq
 
-	assert.Check(t, cmpPortBinding(pb, pb) == 0)
+	assert.Check(t, cmpPortBindingReqs(pb, pb) == 0)
+
+	pbA, pbB = pb, pb
+	pbB.disableNAT = true
+	assert.Check(t, cmpPortBindingReqs(pbA, pbB) < 0)
+	assert.Check(t, cmpPortBindingReqs(pbB, pbA) > 0)
 
 	pbA, pbB = pb, pb
 	pbA.Port = 22
-	assert.Check(t, cmpPortBinding(pbA, pbB) < 0)
-	assert.Check(t, cmpPortBinding(pbB, pbA) > 0)
+	assert.Check(t, cmpPortBindingReqs(pbA, pbB) < 0)
+	assert.Check(t, cmpPortBindingReqs(pbB, pbA) > 0)
 
 	pbA, pbB = pb, pb
 	pbB.Proto = types.UDP
-	assert.Check(t, cmpPortBinding(pbA, pbB) < 0)
-	assert.Check(t, cmpPortBinding(pbB, pbA) > 0)
+	assert.Check(t, cmpPortBindingReqs(pbA, pbB) < 0)
+	assert.Check(t, cmpPortBindingReqs(pbB, pbA) > 0)
 
 	pbA, pbB = pb, pb
 	pbA.Port = 22
 	pbA.Proto = types.UDP
-	assert.Check(t, cmpPortBinding(pbA, pbB) < 0)
-	assert.Check(t, cmpPortBinding(pbB, pbA) > 0)
+	assert.Check(t, cmpPortBindingReqs(pbA, pbB) < 0)
+	assert.Check(t, cmpPortBindingReqs(pbB, pbA) > 0)
 
 	pbA, pbB = pb, pb
 	pbB.HostPort = 8081
-	assert.Check(t, cmpPortBinding(pbA, pbB) < 0)
-	assert.Check(t, cmpPortBinding(pbB, pbA) > 0)
+	assert.Check(t, cmpPortBindingReqs(pbA, pbB) < 0)
+	assert.Check(t, cmpPortBindingReqs(pbB, pbA) > 0)
 
 	pbA, pbB = pb, pb
 	pbB.HostPort, pbB.HostPortEnd = 0, 0
-	assert.Check(t, cmpPortBinding(pbA, pbB) < 0)
-	assert.Check(t, cmpPortBinding(pbB, pbA) > 0)
+	assert.Check(t, cmpPortBindingReqs(pbA, pbB) < 0)
+	assert.Check(t, cmpPortBindingReqs(pbB, pbA) > 0)
 
 	pbA, pbB = pb, pb
 	pbB.HostPortEnd = 8081
-	assert.Check(t, cmpPortBinding(pbA, pbB) < 0)
-	assert.Check(t, cmpPortBinding(pbB, pbA) > 0)
+	assert.Check(t, cmpPortBindingReqs(pbA, pbB) < 0)
+	assert.Check(t, cmpPortBindingReqs(pbB, pbA) > 0)
 
 	pbA, pbB = pb, pb
 	pbA.HostPortEnd = 8080
 	pbB.HostPortEnd = 8081
-	assert.Check(t, cmpPortBinding(pbA, pbB) < 0)
-	assert.Check(t, cmpPortBinding(pbB, pbA) > 0)
+	assert.Check(t, cmpPortBindingReqs(pbA, pbB) < 0)
+	assert.Check(t, cmpPortBindingReqs(pbB, pbA) > 0)
 }
 
 func TestBindHostPortsError(t *testing.T) {
@@ -876,7 +883,20 @@ func TestAddPortMappings(t *testing.T) {
 				}
 			})
 
-			pbs, err := n.addPortMappings(ctx, tc.epAddrV4, tc.epAddrV6, tc.cfg, tc.defHostIP, tc.noProxy6To4)
+			ep := &bridgeEndpoint{
+				id:     "dummyep",
+				nid:    "dummynetwork",
+				addr:   tc.epAddrV4,
+				addrv6: tc.epAddrV6,
+			}
+			var pbm portBindingMode
+			if ep.addr != nil {
+				pbm.ipv4 = true
+			}
+			if ep.addrv6 != nil || (!tc.noProxy6To4 && ep.addr != nil) {
+				pbm.ipv6 = true
+			}
+			pbs, err := n.addPortMappings(ctx, ep, tc.cfg, tc.defHostIP, pbm)
 			if tc.expErr != "" {
 				assert.ErrorContains(t, err, tc.expErr)
 				return
